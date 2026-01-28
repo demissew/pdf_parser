@@ -11,8 +11,8 @@
 - `pyproject.toml` defines runtime dependencies; `uv.lock` pins them.
 
 ## Build, Test, and Development Commands
-- `python main.py` starts the FastAPI server on port 9999.
-- `uvicorn app.main:app --reload --port 9999` is the explicit dev command.
+- `python main.py` starts the FastAPI server on port 29999.
+- `uvicorn app.main:app --reload --port 29999` is the explicit dev command.
 - Dependency install: use `uv sync --all-extras` (preferred) or any tool that honors `pyproject.toml`.
 - `uv run pytest` runs the test suite.
 

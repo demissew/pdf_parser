@@ -4,9 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/pdf_parser
+WorkingDirectory=/var/www/html/pdf_parser/current
+EnvironmentFile=-/var/www/html/pdf_parser/shared/.env
 Environment=PDF_PARSER_TEMP_DIR=/tmp/pdf_parser
-ExecStart=/opt/pdf_parser/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 9999
+ExecStart=/var/www/html/pdf_parser/current/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 29999
 Restart=always
 RestartSec=3
 

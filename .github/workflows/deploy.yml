@@ -1,0 +1,127 @@
+name: Deploy (Env + Rollback)
+run-name: Deploying [${{ inputs.environment }}] by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options:
+          - ne
+        default: ne
+
+jobs:
+  create-artifacts:
+    name: Create artifacts (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout the main branch
+        uses: actions/checkout@v4
+
+      - name: Compress the app files
+        run: tar -czf "${GITHUB_SHA}".tar.gz --exclude=.git --exclude=.venv --exclude=__pycache__ --exclude=*.pyc *
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+
+      - name: Store artifacts for distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-files
+          path: ${{ github.sha }}.tar.gz
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: app-files
+
+      - name: Copy artifacts to server (${{ github.event.inputs.environment }})
+        uses: appleboy/scp-action@master
+        with:
+          overwrite: true
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT }}
+          key: ${{ secrets.SSH_KEY }}
+          source: ${{ github.sha }}.tar.gz
+          target: ${{ secrets.REMOTE_PATH }}/artifacts
+
+  deploy-artifacts:
+    name: Deploy to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    needs: [create-artifacts]
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@master
+        env:
+          APP_ENV_FILE: ${{ secrets.ENV_FILE }}
+          GITHUB_SHA: ${{ github.sha }}
+          BASE_PATH: ${{ secrets.REMOTE_PATH }}
+          HEALTH_URL: ${{ secrets.HEALTH_URL }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: APP_ENV_FILE,GITHUB_SHA,BASE_PATH,HEALTH_URL
+          script: |
+            set -euo pipefail
+
+            RELEASE_PATH="${BASE_PATH}/releases/${GITHUB_SHA}"
+            CURRENT_PATH="${BASE_PATH}/current"
+            SHARED_PATH="${BASE_PATH}/shared"
+            ARTIFACT_PATH="${BASE_PATH}/artifacts/${GITHUB_SHA}.tar.gz"
+
+            PREVIOUS_RELEASE=""
+            if [ -L "${CURRENT_PATH}" ]; then
+              PREVIOUS_RELEASE="$(readlink -f "${CURRENT_PATH}")"
+            fi
+
+            mkdir -p "${RELEASE_PATH}" "${SHARED_PATH}" "${BASE_PATH}/artifacts"
+            mkdir -p "${SHARED_PATH}/logs" "${SHARED_PATH}/tmp"
+
+            tar xzf "${ARTIFACT_PATH}" -C "${RELEASE_PATH}"
+
+            if [ -n "${APP_ENV_FILE:-}" ]; then
+              printf "%s" "${APP_ENV_FILE}" > "${SHARED_PATH}/.env"
+            fi
+            ln -s -f "${SHARED_PATH}/.env" "${RELEASE_PATH}/.env"
+
+            cd "${RELEASE_PATH}"
+            python3 -m venv .venv
+            . .venv/bin/activate
+            python -m pip install --upgrade pip
+            python -m pip install uv
+            uv sync --all-extras --frozen
+
+            ln -s -n -f "${RELEASE_PATH}" "${CURRENT_PATH}"
+
+            sudo systemctl restart pdf_parser
+
+            HEALTH_URL="${HEALTH_URL:-http://localhost:29999/health}"
+            sleep 3
+            if ! curl -fsS "${HEALTH_URL}" >/dev/null; then
+              if [ -n "${PREVIOUS_RELEASE}" ]; then
+                ln -s -n -f "${PREVIOUS_RELEASE}" "${CURRENT_PATH}"
+                sudo systemctl restart pdf_parser
+              fi
+              exit 1
+            fi
+
+            # Keep last 20 releases
+            cd "${BASE_PATH}/releases"
+            ls -t | tail -n +21 | xargs -r sudo rm -rf
+      - name: Workflow Summary
+        if: always()
+        run: |
+          echo "### Deployment Details 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | ${{ github.event.inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Ref** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **SHA** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
