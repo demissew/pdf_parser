@@ -2,13 +2,18 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.services.parser import DocumentParser, cleanup_files
 
 router = APIRouter()
+
+
+class ParseRequest(BaseModel):
+    url: Optional[str] = None
 
 
 def _save_upload(upload: UploadFile, target: Path) -> None:
@@ -37,31 +42,46 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.post("/parse")
-def parse_pdf(
-    file: Annotated[Optional[UploadFile], File()] = None,
-    url: Annotated[Optional[str], Form()] = None,
-) -> JSONResponse:
-    if not file and not url:
+@router.post("/parse/pdf")
+def parse_pdf_json(payload: ParseRequest) -> JSONResponse:
+    if not payload.url:
         raise HTTPException(status_code=400, detail="Provide file or url")
-    if file and url:
-        raise HTTPException(status_code=400, detail="Provide only one input")
 
     temp_dir = Path(settings.temp_dir)
     temp_dir.mkdir(parents=True, exist_ok=True)
     cleanup: list[Path] = []
 
     try:
-        if file:
-            if file.content_type not in {"application/pdf"}:
-                raise HTTPException(status_code=400, detail="Only PDF files supported")
-            target = temp_dir / file.filename if file.filename else temp_dir / "upload.pdf"
-            _save_upload(file, target)
-            _enforce_size_limit(target)
-        else:
-            target = temp_dir / "download.pdf"
-            _download_to(url, target)
-            _enforce_size_limit(target)
+        target = temp_dir / "download.pdf"
+        _download_to(payload.url, target)
+        _enforce_size_limit(target)
+
+        cleanup.append(target)
+        parser = DocumentParser()
+        markdown = parser.parse(target)
+    finally:
+        cleanup_files(cleanup)
+
+    return JSONResponse({"markdown": markdown})
+
+
+@router.post("/parse/file")
+def parse_pdf_file(
+    file: Annotated[Optional[UploadFile], File()] = None,
+) -> JSONResponse:
+    if not file:
+        raise HTTPException(status_code=400, detail="Provide file or url")
+
+    temp_dir = Path(settings.temp_dir)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    cleanup: list[Path] = []
+
+    try:
+        if file.content_type not in {"application/pdf"}:
+            raise HTTPException(status_code=400, detail="Only PDF files supported")
+        target = temp_dir / file.filename if file.filename else temp_dir / "upload.pdf"
+        _save_upload(file, target)
+        _enforce_size_limit(target)
 
         cleanup.append(target)
         parser = DocumentParser()
