@@ -101,14 +101,14 @@ jobs:
 
             ln -s -n -f "${RELEASE_PATH}" "${CURRENT_PATH}"
 
-            sudo systemctl restart pdf_parser
+            sudo service pdf_parser restart
 
             HEALTH_URL="${HEALTH_URL:-http://localhost:29999/health}"
             sleep 3
             if ! curl -fsS "${HEALTH_URL}" >/dev/null; then
               if [ -n "${PREVIOUS_RELEASE}" ]; then
                 ln -s -n -f "${PREVIOUS_RELEASE}" "${CURRENT_PATH}"
-                sudo systemctl restart pdf_parser
+                sudo service pdf_parser restart
               fi
               exit 1
             fi
