@@ -1,0 +1,14 @@
+[Unit]
+Description=Dockling API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/pdf_parser
+Environment=PDF_PARSER_TEMP_DIR=/tmp/pdf_parser
+ExecStart=/opt/pdf_parser/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 9999
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
