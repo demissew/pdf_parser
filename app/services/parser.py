@@ -7,11 +7,12 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 
 from app.core.config import settings
 
+
 class DocumentParser:
     def __init__(self) -> None:
         pipeline_options = PdfPipelineOptions(
             do_ocr=False,
-            do_table_structure=False,
+            do_table_structure=True,
             do_picture_classification=False,
             do_picture_description=False,
             do_code_enrichment=False,

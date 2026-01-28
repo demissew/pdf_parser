@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     docling_num_threads: int = 2
     docling_device: str = "cpu"
-    docling_timeout_s: float | None = 180.0
+    docling_timeout_s: float | None = 500.0
     docling_max_num_pages: int = 300
     docling_max_file_size_mb: int = 25
 
