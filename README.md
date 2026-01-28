@@ -18,6 +18,16 @@ uv sync --all-extras
 uvicorn app.main:app --reload --port 29999
 ```
 
+## Configuration (env)
+
+```bash
+PDF_PARSER_DOCLING_NUM_THREADS=2
+PDF_PARSER_DOCLING_DEVICE=cpu
+PDF_PARSER_DOCLING_TIMEOUT_S=180
+PDF_PARSER_DOCLING_MAX_NUM_PAGES=300
+PDF_PARSER_DOCLING_MAX_FILE_SIZE_MB=25
+```
+
 ## Tests
 
 ```bash

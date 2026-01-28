@@ -37,6 +37,25 @@ def _download_to(url: str, target: Path) -> None:
                 handle.write(chunk)
 
 
+def _parse_to_markdown(target: Path) -> str:
+    parser = DocumentParser()
+    try:
+        return parser.parse(target)
+    except Exception as exc:
+        message = str(exc).lower()
+        if "max_num_pages" in message or "max pages" in message:
+            raise HTTPException(
+                status_code=413,
+                detail="PDF exceeds the maximum page limit",
+            ) from exc
+        if "max_file_size" in message or "file size" in message:
+            raise HTTPException(
+                status_code=413,
+                detail="PDF exceeds the maximum file size limit",
+            ) from exc
+        raise
+
+
 @router.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
@@ -57,8 +76,7 @@ def parse_pdf_json(payload: ParseRequest) -> JSONResponse:
         _enforce_size_limit(target)
 
         cleanup.append(target)
-        parser = DocumentParser()
-        markdown = parser.parse(target)
+        markdown = _parse_to_markdown(target)
     finally:
         cleanup_files(cleanup)
 
@@ -84,8 +102,7 @@ def parse_pdf_file(
         _enforce_size_limit(target)
 
         cleanup.append(target)
-        parser = DocumentParser()
-        markdown = parser.parse(target)
+        markdown = _parse_to_markdown(target)
     finally:
         cleanup_files(cleanup)
 
