@@ -104,8 +104,8 @@ jobs:
             sudo service pdf_parser restart
 
             HEALTH_URL="${HEALTH_URL:-http://localhost:29999/health}"
-            sleep 3
-            if ! curl -fsS "${HEALTH_URL}" >/dev/null; then
+            # Docling imports can be slow on small servers; wait/retry before rollback.
+            if ! curl -fsS --retry 20 --retry-delay 3 --retry-all-errors "${HEALTH_URL}" >/dev/null; then
               if [ -n "${PREVIOUS_RELEASE}" ]; then
                 ln -s -n -f "${PREVIOUS_RELEASE}" "${CURRENT_PATH}"
                 sudo service pdf_parser restart
