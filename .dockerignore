@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+
+# Python
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+
+# Tests
+tests/
+.pytest_cache
+
+# CI/CD
+.github/
+
+# Deployment
+deploy/
+
+# Documentation
+*.md
+docs/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Temporary files
+tmp/
+*.tmp

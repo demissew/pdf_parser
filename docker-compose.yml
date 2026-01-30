@@ -1,0 +1,42 @@
+services:
+  pdf_parser:
+    build: .
+    image: pdf_parser:latest
+    container_name: pdf_parser
+    ports:
+      - "29999:8000"
+    environment:
+      - PDF_PARSER_APP_NAME=${PDF_PARSER_APP_NAME:-pdf_parser}
+      - PDF_PARSER_TEMP_DIR=${PDF_PARSER_TEMP_DIR:-/tmp/pdf_parser}
+      - PDF_PARSER_MAX_UPLOAD_MB=${PDF_PARSER_MAX_UPLOAD_MB:-25}
+      - PDF_PARSER_LOG_LEVEL=${PDF_PARSER_LOG_LEVEL:-INFO}
+      - PDF_PARSER_LOG_FORMAT=${PDF_PARSER_LOG_FORMAT:-json}
+      - PDF_PARSER_API_KEYS=${PDF_PARSER_API_KEYS:-}
+      - PDF_PARSER_WORKERS=${PDF_PARSER_WORKERS:-2}
+      - PDF_PARSER_WORKER_TIMEOUT=${PDF_PARSER_WORKER_TIMEOUT:-600}
+      - PDF_PARSER_DOCLING_NUM_THREADS=${PDF_PARSER_DOCLING_NUM_THREADS:-2}
+      - PDF_PARSER_DOCLING_DEVICE=${PDF_PARSER_DOCLING_DEVICE:-auto}
+      - PDF_PARSER_DOCLING_TIMEOUT_S=${PDF_PARSER_DOCLING_TIMEOUT_S:-500.0}
+      - PDF_PARSER_DOCLING_MAX_NUM_PAGES=${PDF_PARSER_DOCLING_MAX_NUM_PAGES:-300}
+      - PDF_PARSER_DOCLING_MAX_FILE_SIZE_MB=${PDF_PARSER_DOCLING_MAX_FILE_SIZE_MB:-25}
+    volumes:
+      - pdf_parser_tmp:/tmp/pdf_parser
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+volumes:
+  pdf_parser_tmp:
+    name: pdf_parser_tmp

@@ -6,6 +6,7 @@
     "pydantic",
     "pyproject",
     "pytest",
+    "redoc",
     "uvicorn"
   ]
 }

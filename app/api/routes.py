@@ -2,10 +2,11 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import httpx
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.api.auth import verify_api_key
 from app.core.config import settings
 from app.services.parser import DocumentParser, cleanup_files
 
@@ -61,7 +62,7 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.post("/parse/pdf")
+@router.post("/parse/pdf", dependencies=[Depends(verify_api_key)])
 def parse_pdf_json(payload: ParseRequest) -> JSONResponse:
     if not payload.url:
         raise HTTPException(status_code=400, detail="Provide file or url")
@@ -83,7 +84,7 @@ def parse_pdf_json(payload: ParseRequest) -> JSONResponse:
     return JSONResponse({"markdown": markdown})
 
 
-@router.post("/parse/file")
+@router.post("/parse/file", dependencies=[Depends(verify_api_key)])
 def parse_pdf_file(
     file: Annotated[Optional[UploadFile], File()] = None,
 ) -> JSONResponse:

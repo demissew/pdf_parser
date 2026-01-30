@@ -1,4 +1,4 @@
-name: Deploy (Env + Rollback)
+name: Deploy (Docker)
 run-name: Deploying [${{ inputs.environment }}] by @${{ github.actor }}
 
 on:
@@ -13,46 +13,9 @@ on:
         default: ne
 
 jobs:
-  create-artifacts:
-    name: Create artifacts (${{ github.event.inputs.environment }})
-    runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment }}
-
-    steps:
-      - name: Checkout the main branch
-        uses: actions/checkout@v4
-
-      - name: Compress the app files
-        run: tar -czf "${GITHUB_SHA}".tar.gz --exclude=.git --exclude=.venv --exclude=__pycache__ --exclude=*.pyc *
-        env:
-          GITHUB_SHA: ${{ github.sha }}
-
-      - name: Store artifacts for distribution
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-files
-          path: ${{ github.sha }}.tar.gz
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: app-files
-
-      - name: Copy artifacts to server (${{ github.event.inputs.environment }})
-        uses: appleboy/scp-action@master
-        with:
-          overwrite: true
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          port: ${{ secrets.SSH_PORT }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          source: ${{ github.sha }}.tar.gz
-          target: ${{ secrets.REMOTE_PATH }}/artifacts
-
-  deploy-artifacts:
+  deploy:
     name: Deploy to ${{ github.event.inputs.environment }}
     runs-on: ubuntu-latest
-    needs: [create-artifacts]
     environment: ${{ github.event.inputs.environment }}
 
     steps:
@@ -61,61 +24,81 @@ jobs:
         env:
           APP_ENV_FILE: ${{ secrets.ENV_FILE }}
           GITHUB_SHA: ${{ github.sha }}
-          BASE_PATH: ${{ secrets.REMOTE_PATH }}
+          REMOTE_PATH: ${{ secrets.REMOTE_PATH }}
           HEALTH_URL: ${{ secrets.HEALTH_URL }}
+          GIT_BRANCH: ${{ github.ref_name }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           port: ${{ secrets.SSH_PORT }}
           password: ${{ secrets.SSH_PASSWORD }}
-          envs: APP_ENV_FILE,GITHUB_SHA,BASE_PATH,HEALTH_URL
+          envs: APP_ENV_FILE,GITHUB_SHA,REMOTE_PATH,HEALTH_URL,GIT_BRANCH
           script: |
             set -euo pipefail
 
-            RELEASE_PATH="${BASE_PATH}/releases/${GITHUB_SHA}"
-            CURRENT_PATH="${BASE_PATH}/current"
-            SHARED_PATH="${BASE_PATH}/shared"
-            ARTIFACT_PATH="${BASE_PATH}/artifacts/${GITHUB_SHA}.tar.gz"
+            cd "${REMOTE_PATH}"
 
-            PREVIOUS_RELEASE=""
-            if [ -L "${CURRENT_PATH}" ]; then
-              PREVIOUS_RELEASE="$(readlink -f "${CURRENT_PATH}")"
-            fi
+            # Pull latest code
+            git fetch origin
+            git checkout "${GIT_BRANCH}"
+            git pull origin "${GIT_BRANCH}"
 
-            mkdir -p "${RELEASE_PATH}" "${SHARED_PATH}" "${BASE_PATH}/artifacts"
-            mkdir -p "${SHARED_PATH}/logs" "${SHARED_PATH}/tmp"
-
-            tar xzf "${ARTIFACT_PATH}" -C "${RELEASE_PATH}"
-
+            # Write environment file
             if [ -n "${APP_ENV_FILE:-}" ]; then
-              printf "%s" "${APP_ENV_FILE}" > "${SHARED_PATH}/.env"
+              printf "%s" "${APP_ENV_FILE}" > .env
             fi
-            ln -s -f "${SHARED_PATH}/.env" "${RELEASE_PATH}/.env"
 
-            cd "${RELEASE_PATH}"
-            python3 -m venv .venv
-            . .venv/bin/activate
-            python -m pip install --upgrade pip
-            python -m pip install uv
-            uv sync --all-extras --frozen
+            # Save current container ID for rollback
+            PREVIOUS_CONTAINER_ID=""
+            if docker ps -a --filter "name=pdf_parser" --format "{{.ID}}" | grep -q .; then
+              PREVIOUS_CONTAINER_ID=$(docker ps -a --filter "name=pdf_parser" --format "{{.ID}}")
+            fi
 
-            ln -s -n -f "${RELEASE_PATH}" "${CURRENT_PATH}"
+            # Build new image
+            docker-compose build
 
-            sudo service pdf_parser restart
+            # Stop old container
+            docker-compose down || true
 
+            # Start new container
+            docker-compose up -d
+
+            # Health check with retries
             HEALTH_URL="${HEALTH_URL:-http://localhost:29999/health}"
-            # Docling imports can be slow on small servers; wait/retry before rollback.
-            if ! curl -fsS --retry 20 --retry-delay 3 --retry-all-errors "${HEALTH_URL}" >/dev/null; then
-              if [ -n "${PREVIOUS_RELEASE}" ]; then
-                ln -s -n -f "${PREVIOUS_RELEASE}" "${CURRENT_PATH}"
-                sudo service pdf_parser restart
+            RETRIES=20
+            DELAY=3
+            SUCCESS=false
+
+            for i in $(seq 1 ${RETRIES}); do
+              echo "Health check attempt ${i}/${RETRIES}..."
+              if curl -fsS --max-time 5 "${HEALTH_URL}" >/dev/null 2>&1; then
+                echo "Health check passed!"
+                SUCCESS=true
+                break
               fi
+              if [ ${i} -lt ${RETRIES} ]; then
+                sleep ${DELAY}
+              fi
+            done
+
+            # Rollback on health check failure
+            if [ "${SUCCESS}" = "false" ]; then
+              echo "Health check failed after ${RETRIES} attempts. Rolling back..."
+              docker-compose down || true
+
+              if [ -n "${PREVIOUS_CONTAINER_ID}" ]; then
+                docker start ${PREVIOUS_CONTAINER_ID}
+                echo "Rolled back to previous container: ${PREVIOUS_CONTAINER_ID}"
+              fi
+
               exit 1
             fi
 
-            # Keep last 20 releases
-            cd "${BASE_PATH}/releases"
-            ls -t | tail -n +21 | xargs -r sudo rm -rf
+            # Cleanup old images (keep last 5)
+            docker images "pdf_parser" --format "{{.ID}}" | tail -n +6 | xargs -r docker rmi || true
+
+            echo "Deployment successful!"
+
       - name: Workflow Summary
         if: always()
         run: |
@@ -123,5 +106,5 @@ jobs:
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Environment** | ${{ github.event.inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Ref** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **SHA** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
